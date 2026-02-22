@@ -157,7 +157,7 @@ resource "aws_iam_role_policy" "github_actions_ecs" {
         Action = "iam:PassRole"
         Resource = [
           aws_iam_role.ecs_execution.arn,
-          #aws_iam_role.ecs_task.arn
+          aws_iam_role.ecs_task.arn
         ]
       }
     ]
