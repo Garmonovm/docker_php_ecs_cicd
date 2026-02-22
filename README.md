@@ -2,32 +2,7 @@
 
 Production-ready PHP application deployed on AWS ECS Fargate with ALB, provisioned via Terraform, and automated with GitHub Actions CI/CD.
 
-## Architecture
 
-```
-                    ┌─────────────────────────────────────────────────────┐
-                    │                     AWS Cloud                       │
-                    │                                                     │
-                    │  ┌──────────────────────────────────────────────┐   │
-                    │  │               VPC (10.0.0.0/16)              │   │
-                    │  │                                              │   │
-  Internet ────────┼──┼─► ALB (port 80) ──► ECS Fargate (port 8080) │   │
-                    │  │      │                    │                  │   │
-                    │  │      │              ┌─────┴─────┐           │   │
-                    │  │   Health Check      │  PHP App  │           │   │
-                    │  │   GET /health       │ (Slim 4)  │           │   │
-                    │  │                     └─────┬─────┘           │   │
-                    │  │                           │                  │   │
-                    │  └───────────────────────────┼──────────────────┘   │
-                    │                              │                      │
-                    │       ┌───────────┐    ┌─────┴──────┐              │
-                    │       │    ECR    │    │ CloudWatch │              │
-                    │       │ (images) │    │   (logs)   │              │
-                    │       └───────────┘    └────────────┘              │
-                    └─────────────────────────────────────────────────────┘
-
-  GitHub Actions (OIDC) ──► Build ──► Push to ECR ──► Deploy to ECS ──► Verify /health
-```
 
 ## Project Structure
 
