@@ -6,7 +6,6 @@ data "aws_caller_identity" "current" {}
 
 data "aws_region" "current" {}
 
-# Default VPC and subnets — no new VPC provisioned
 data "aws_vpc" "default" {
   default = true
 }

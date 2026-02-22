@@ -1,6 +1,5 @@
 # PHP Application on AWS ECS Fargate
-
-Production-ready PHP application deployed on AWS ECS Fargate with ALB, provisioned via Terraform, and automated with GitHub Actions CI/CD.
+PHP application deployed on AWS ECS Fargate with ALB, provisioned via Terraform, and automated with GitHub Actions CI/CD.
 
 
 
