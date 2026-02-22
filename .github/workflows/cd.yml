@@ -20,9 +20,9 @@ permissions:
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECS_CLUSTER: allflex-prod-cluster
-  ECS_SERVICE: allflex-prod-php-app
-  TASK_FAMILY: allflex-prod-php-app
+  ECS_CLUSTER: allflex-dev-cluster
+  ECS_SERVICE: allflex-dev-php-app
+  TASK_FAMILY: allflex-dev-php-app
   CONTAINER_NAME: php-app
   ECR_REPOSITORY: php-app
 
