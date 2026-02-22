@@ -26,12 +26,9 @@ env:
   ECR_REPOSITORY: php-app
 
 jobs:
-  # Step 1: Build and push image to ECR
-  build-and-push:
-    name: Build & Push to ECR
+  deploy:
+    name: Build, Push & Deploy
     runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.set-image.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,43 +42,17 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Capture the full image URI BEFORE the build step so it's available
-      # regardless of how docker/build-push-action handles step contexts.
-      - name: Compute and expose image URI
-        id: set-image
+      # Store image URI in a plain env var — no inter-job output passing needed
+      - name: Set IMAGE env var
         run: |
-          IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${GITHUB_REF_NAME}"
-          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "Image URI: ${IMAGE}"
+          echo "IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
 
       - name: Build, tag, and push image to ECR
         uses: docker/build-push-action@v6
         with:
           context: app
           push: true
-          tags: ${{ steps.set-image.outputs.image }}
-
-  # Deploy to ECS
-  deploy:
-    name: Deploy to ECS
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Verify image output
-        run: |
-          echo "Image to deploy: ${{ needs.build-and-push.outputs.image }}"
-          if [[ -z "${{ needs.build-and-push.outputs.image }}" ]]; then
-            echo "ERROR: image output is empty!"
-            exit 1
-          fi
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.ECR_AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          tags: ${{ env.IMAGE }}
 
       - name: Download current task definition
         run: |
@@ -90,13 +61,13 @@ jobs:
             --query 'taskDefinition' \
             --output json > task-definition.json
 
-          # Remove fields that cannot be included in RegisterTaskDefinition
           jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
             task-definition.json > cleaned-task-def.json
 
           mv cleaned-task-def.json task-definition.json
+
           echo "Container names in task def:"
-          cat task-definition.json | jq '[.containerDefinitions[].name]'
+          jq '[.containerDefinitions[].name]' task-definition.json
 
       - name: Update image in task definition
         id: render
@@ -104,7 +75,7 @@ jobs:
         with:
           task-definition: task-definition.json
           container-name: ${{ env.CONTAINER_NAME }}
-          image: ${{ needs.build-and-push.outputs.image }}
+          image: ${{ env.IMAGE }}
 
       - name: Deploy to ECS service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
@@ -114,7 +85,6 @@ jobs:
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
 
-  # Verify deployment health
   verify:
     name: Verify Health
     needs: deploy
@@ -126,7 +96,7 @@ jobs:
           APP_URL: ${{ vars.APP_URL }}
         run: |
           echo "Checking health at: ${APP_URL}/health"
-          
+
           for i in $(seq 1 30); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${APP_URL}/health" || echo "000")
             if [[ "$STATUS" == "200" ]]; then
@@ -138,5 +108,6 @@ jobs:
             echo "Attempt $i/30: HTTP $STATUS — waiting 10s..."
             sleep 10
           done
+
           echo "Health check failed after 5 minutes!"
           exit 1
