@@ -26,9 +26,9 @@ jobs:
           dockerfile: app/Dockerfile
           failure-threshold: warning
 
-  # Build and optionally scan the image
+  # Build
   build-and-scan:
-    name: Build & Scan
+    name: Build
     needs: lint
     runs-on: ubuntu-latest
     steps:

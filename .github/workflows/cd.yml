@@ -50,24 +50,34 @@ jobs:
         id: tag
         run: echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: false
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.IMAGE_TAG }}
+
+      #Trivy disabled due to a lot of vulns
+      # - name: Scan Docker image with Trivy
+      #   uses: aquasecurity/trivy-action@v0.28.0
+      #   with:
+      #     image-ref: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.IMAGE_TAG }}
+      #     severity: CRITICAL,HIGH
+      #     ignore-unfixed: true
+      #     format: table
+      #     exit-code: 1
+      #     timeout: 10m
+
+      - name: Push Docker image to ECR
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: app
           push: true
           tags: |
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.IMAGE_TAG }}
-            
-      # Trivy scan - disabled due to a lot of vulns
-      # - name: Scan image with Trivy
-      #   uses: aquasecurity/trivy-action@0.28.0
-      #   with:
-      #     image-ref: "${{ steps.ecr.outputs.registry }}/php-app:${{ steps.tag.outputs.IMAGE_TAG }}"
-      #     format: table
-      #     exit-code: 1
-      #     severity: CRITICAL,HIGH
-      #     timeout: 10m
 
       - name: Output image URI
         id: output
