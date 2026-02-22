@@ -1,0 +1,131 @@
+# Triggered on tag in main
+# Flow:
+#   1. Build Docker image and push to ECR with tag
+#   2. Update ECS task definition with new image
+#   3. Deploy new task definition to ECS service
+#   4. Wait for service stability (ECS circuit breaker handles rollback)
+#   5. Verify /health endpoint returns HTTP 200
+# ============================================================================
+
+name: CD — Deploy to ECS
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECS_CLUSTER: allflex-prod-cluster
+  ECS_SERVICE: allflex-prod-php-app
+  TASK_FAMILY: allflex-prod-php-app
+  CONTAINER_NAME: php-app
+  ECR_REPOSITORY: php-app
+
+jobs:
+  # Step 1: Build and push image to ECR
+  build-and-push:
+    name: Build & Push to ECR
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ECR_AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: tag
+        run: echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.IMAGE_TAG }}
+
+      - name: Output image URI
+        id: output
+        run: |
+          echo "image=${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+
+  # Deploy to ECS
+  deploy:
+    name: Deploy to ECS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ECR_AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.TASK_FAMILY }} \
+            --query 'taskDefinition' \
+            --output json > task-definition.json
+
+          # Remove fields that cannot be included in RegisterTaskDefinition
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            task-definition.json > cleaned-task-def.json
+
+          mv cleaned-task-def.json task-definition.json
+
+      - name: Update image in task definition
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ needs.build-and-push.outputs.image }}
+
+      - name: Deploy to ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+  # Verify deployment health
+  verify:
+    name: Verify Health
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check
+        run: |
+          APP_URL="${{ vars.APP_URL }}"
+          echo "Checking health at: ${APP_URL}/health"
+
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${APP_URL}/health" 2>/dev/null || echo "000")
+            if [[ "$STATUS" == "200" ]]; then
+              echo "Application is healthy!"
+              BODY=$(curl -s "${APP_URL}/health")
+              echo "$BODY" | jq . || echo "$BODY"
+              exit 0
+            fi
+            echo "  Attempt $i/30: HTTP $STATUS — waiting 10s..."
+            sleep 10
+          done
+          echo "::error::Health check failed after 5 minutes!"
+          exit 1
