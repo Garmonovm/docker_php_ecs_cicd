@@ -42,7 +42,6 @@ docker_php_ecs_cicd/
 - **Docker** (for local builds)
 - AWS IAM role with permissions to create ECS, ALB, ECR, IAM, CloudWatch resources
 
-## Quick Start
 
 ### 1. Provision Infrastructure
 
