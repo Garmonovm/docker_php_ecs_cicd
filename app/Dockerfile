@@ -14,10 +14,8 @@ FROM composer:2.8 AS builder
 
 WORKDIR /build
 
-# Copy dependency manifest first (Docker layer caching)
 COPY composer.json composer.lock* ./
 
-# Install production dependencies only — no dev packages
 RUN composer install \
     --no-dev \
     --no-interaction \
@@ -25,7 +23,6 @@ RUN composer install \
     --optimize-autoloader \
     --prefer-dist
 
-# Copy application source code
 COPY . .
 
 # ---------------------------------------------------------------------------
@@ -33,28 +30,24 @@ COPY . .
 # ---------------------------------------------------------------------------
 FROM php:8.3-alpine AS runtime
 
-# Metadata
 LABEL maintainer="owner_me" \
       description="Production PHP application" \
       version="1.0.0"
 
+# Pin apk package versions to satisfy DL3018.
+# To find current versions run: docker run php:8.3-alpine apk info -v | grep -E "^(apache2|curl)"
 RUN apk add --no-cache \
-        apache2 \
-        apache2-mod-php83 \
-        curl \
+        apache2=2.4.62-r0 \
+        apache2-mod-php83=8.3.14-r0 \
+        curl=8.11.1-r0 \
     && docker-php-ext-install opcache \
-    && ln -sf /usr/lib/apache2/mod_php83.so /usr/lib/apache2/mod_php.so
-
-# Enable required Apache modules
-RUN sed -i \
+    && ln -sf /usr/lib/apache2/mod_php83.so /usr/lib/apache2/mod_php.so \
+    && sed -i \
         -e 's/#LoadModule rewrite_module/LoadModule rewrite_module/' \
         -e 's/#LoadModule headers_module/LoadModule headers_module/' \
-        /etc/apache2/httpd.conf
+        /etc/apache2/httpd.conf \
+    && mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
-# Harden PHP for production
-RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
-
-# Custom PHP production settings
 COPY <<'EOF' /usr/local/etc/php/conf.d/99-production.ini
 ; Performance
 opcache.enable=1
@@ -75,18 +68,15 @@ post_max_size=10M
 upload_max_filesize=10M
 EOF
 
-# Environment
 ENV PORT=8080
 ENV APP_NAME=php-app
 ENV APP_VERSION=1.0.0
 
-# Configure Apache: listen on $PORT, set ServerName to suppress warnings
 RUN sed -i \
         -e "s/^Listen 80$/Listen ${PORT}/" \
         -e "s/^#ServerName.*/ServerName localhost/" \
         /etc/apache2/httpd.conf
 
-# Apache VirtualHost — mirrors original config, adapted for Alpine httpd.conf style
 COPY <<'EOF' /etc/apache2/conf.d/app.conf
 Listen ${PORT}
 
@@ -106,31 +96,22 @@ Listen ${PORT}
 </VirtualHost>
 EOF
 
-# Set working directory
 WORKDIR /var/www/html
 
-# Copy vendor (dependencies) from builder stage
 COPY --from=builder /build/vendor ./vendor
-
-# Copy application source
 COPY --from=builder /build/composer.json ./
 COPY --from=builder /build/public ./public
 
-# Ensure correct ownership for www-data (Alpine uses different UID — create if needed)
 RUN adduser -u 82 -D -S -G www-data www-data 2>/dev/null || true \
     && chown -R www-data:www-data /var/www/html \
     && chown -R www-data:www-data /var/log/apache2 \
     && chown -R www-data:www-data /run/apache2
 
-# Security: run as non-root
 USER www-data
 
-# Expose the configurable port
 EXPOSE ${PORT}
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Run Apache in foreground
 CMD ["httpd", "-D", "FOREGROUND"]
