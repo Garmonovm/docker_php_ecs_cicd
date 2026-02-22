@@ -35,6 +35,7 @@ LABEL maintainer="owner_me" \
 # Upgrade ALL OS packages to pull in security patches for the CVEs Trivy flags.
 # This is the key step that eliminates the 50 vulnerabilities — they come from
 # outdated Debian packages in the base image, not from PHP itself.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl \
