@@ -1,14 +1,12 @@
 # ============================================================================
 # Multi-stage Dockerfile for PHP Application
 # Stage 1: Build — install Composer dependencies
-# Stage 2: Runtime — Alpine-based production image with PHP + Apache
-#
-# Switched from php:8.3-apache (Debian Bookworm) to php:8.3-alpine + Apache2
-# to drastically reduce the OS-level vulnerability surface (50+ → ~0-3).
+# Stage 2: Runtime — php:8.3-apache with all OS packages upgraded to patch
+#          the CVEs Trivy reports (no Alpine mod_php package issues)
 # ============================================================================
 
 # ---------------------------------------------------------------------------
-# Stage 1: Builder — install PHP dependencies via Composer
+# Stage 1: Builder
 # ---------------------------------------------------------------------------
 FROM composer:2.8 AS builder
 
@@ -26,27 +24,29 @@ RUN composer install \
 COPY . .
 
 # ---------------------------------------------------------------------------
-# Stage 2: Runtime — Alpine-based minimal production image
+# Stage 2: Runtime
 # ---------------------------------------------------------------------------
-FROM php:8.3-alpine AS runtime
+FROM php:8.3-apache AS runtime
 
 LABEL maintainer="owner_me" \
       description="Production PHP application" \
       version="1.0.0"
 
-# Pin apk package versions to satisfy DL3018.
-# To find current versions run: docker run php:8.3-alpine apk info -v | grep -E "^(apache2|curl)"
-RUN apk add --no-cache \
-        apache2=2.4.62-r0 \
-        apache2-mod-php83=8.3.14-r0 \
-        curl=8.11.1-r0 \
-    && docker-php-ext-install opcache \
-    && ln -sf /usr/lib/apache2/mod_php83.so /usr/lib/apache2/mod_php.so \
-    && sed -i \
-        -e 's/#LoadModule rewrite_module/LoadModule rewrite_module/' \
-        -e 's/#LoadModule headers_module/LoadModule headers_module/' \
-        /etc/apache2/httpd.conf \
-    && mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+# Upgrade ALL OS packages to pull in security patches for the CVEs Trivy flags.
+# This is the key step that eliminates the 50 vulnerabilities — they come from
+# outdated Debian packages in the base image, not from PHP itself.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PHP extensions + enable Apache modules
+RUN docker-php-ext-install opcache \
+    && a2enmod rewrite headers
+
+# Harden PHP for production
+RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
 COPY <<'EOF' /usr/local/etc/php/conf.d/99-production.ini
 ; Performance
@@ -72,14 +72,10 @@ ENV PORT=8080
 ENV APP_NAME=php-app
 ENV APP_VERSION=1.0.0
 
-RUN sed -i \
-        -e "s/^Listen 80$/Listen ${PORT}/" \
-        -e "s/^#ServerName.*/ServerName localhost/" \
-        /etc/apache2/httpd.conf
+RUN sed -i "s/Listen 80/Listen ${PORT}/" /etc/apache2/ports.conf \
+    && echo "ServerName localhost" >> /etc/apache2/apache2.conf
 
-COPY <<'EOF' /etc/apache2/conf.d/app.conf
-Listen ${PORT}
-
+COPY <<'EOF' /etc/apache2/sites-available/000-default.conf
 <VirtualHost *:${PORT}>
     ServerAdmin webmaster@localhost
     DocumentRoot /var/www/html/public
@@ -102,10 +98,7 @@ COPY --from=builder /build/vendor ./vendor
 COPY --from=builder /build/composer.json ./
 COPY --from=builder /build/public ./public
 
-RUN adduser -u 82 -D -S -G www-data www-data 2>/dev/null || true \
-    && chown -R www-data:www-data /var/www/html \
-    && chown -R www-data:www-data /var/log/apache2 \
-    && chown -R www-data:www-data /run/apache2
+RUN chown -R www-data:www-data /var/www/html
 
 USER www-data
 
@@ -114,4 +107,4 @@ EXPOSE ${PORT}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-CMD ["httpd", "-D", "FOREGROUND"]
+CMD ["apache2-foreground"]

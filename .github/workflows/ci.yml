@@ -28,7 +28,7 @@ jobs:
 
   # Build
   build-and-scan:
-    name: Build
+    name: Build & Scan
     needs: lint
     runs-on: ubuntu-latest
     steps:
