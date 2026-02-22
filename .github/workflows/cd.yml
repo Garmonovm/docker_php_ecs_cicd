@@ -45,25 +45,21 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set image tag
-        id: tag
-        run: echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+      # Capture the full image URI BEFORE the build step so it's available
+      # regardless of how docker/build-push-action handles step contexts.
+      - name: Compute and expose image URI
+        id: set-image
+        run: |
+          IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${GITHUB_REF_NAME}"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Image URI: ${IMAGE}"
 
       - name: Build, tag, and push image to ECR
-        id: build-push
         uses: docker/build-push-action@v6
         with:
           context: app
           push: true
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.IMAGE_TAG }}
-
-      - name: Output image URI
-        id: set-image
-        run: |
-          IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.IMAGE_TAG }}"
-          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "Image URI: ${IMAGE}"
+          tags: ${{ steps.set-image.outputs.image }}
 
   # Deploy to ECS
   deploy:
@@ -99,8 +95,8 @@ jobs:
             task-definition.json > cleaned-task-def.json
 
           mv cleaned-task-def.json task-definition.json
-          echo "Task definition downloaded:"
-          cat task-definition.json | jq .containerDefinitions[].name
+          echo "Container names in task def:"
+          cat task-definition.json | jq '[.containerDefinitions[].name]'
 
       - name: Update image in task definition
         id: render
