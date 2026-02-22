@@ -24,9 +24,9 @@ resource "aws_iam_role_policy_attachment" "ecs_execution" {
 }
 
 
-# ECS Task Role Used by the running container. Least-privilege: no policies attached.
-# Add policies here if the application needs to access AWS services (S3, SQS, etc.)
-
+# ECS Task Role: Assigned to containers in the task to grant them permissions to access AWS resources.
+# GitHub Actions uses iam:PassRole to allow ECS to assign this role to tasks during deployment.
+# This role itself has no policies attached, as permissions depend on the application's needs.
 resource "aws_iam_role" "ecs_task" {
   name = "${local.name_prefix}-ecs-task-role"
 
@@ -157,7 +157,7 @@ resource "aws_iam_role_policy" "github_actions_ecs" {
         Action = "iam:PassRole"
         Resource = [
           aws_iam_role.ecs_execution.arn,
-          #aws_iam_role.ecs_task.arn
+          aws_iam_role.ecs_task.arn
         ]
       }
     ]

@@ -42,7 +42,7 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Store image URI in a plain env var — no inter-job output passing needed
+      # Store image URI in a plain env var for deployment.
       - name: Set IMAGE env var
         run: |
           echo "IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
