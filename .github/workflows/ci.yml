@@ -57,12 +57,12 @@ jobs:
           tags: |
             ${{ steps.ecr.outputs.registry }}/php-app:${{ steps.tag.outputs.IMAGE_TAG }}
 
-      # Trivy scan - disabled due to a lot of vulns
-      # - name: Scan image with Trivy
-      #   uses: aquasecurity/trivy-action@0.28.0
-      #   with:
-      #     image-ref: "${{ steps.ecr.outputs.registry }}/php-app:${{ steps.tag.outputs.IMAGE_TAG }}"
-      #     format: table
-      #     exit-code: 1
-      #     severity: CRITICAL,HIGH
-      #     timeout: 10m
+      Trivy scan - disabled due to a lot of vulns
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "${{ steps.ecr.outputs.registry }}/php-app:${{ steps.tag.outputs.IMAGE_TAG }}"
+          format: table
+          exit-code: 1
+          severity: CRITICAL,HIGH
+          timeout: 10m
