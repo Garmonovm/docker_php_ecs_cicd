@@ -1,0 +1,113 @@
+# Triggered on tag in main
+# Flow:
+#   1. Build Docker image and push to ECR with tag
+#   2. Update ECS task  with new image
+#   3. Deploy new task to ECS service
+#   4. Verify /health endpoint returns HTTP 200
+#   5. If ECS fail to stabilize, it will rollback to previous task definition.
+# ============================================================================
+name: CD — Deploy to ECS
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECS_CLUSTER: allflex-dev-cluster
+  ECS_SERVICE: allflex-dev-php-app
+  TASK_FAMILY: allflex-dev-php-app
+  CONTAINER_NAME: php-app
+  ECR_REPOSITORY: php-app
+
+jobs:
+  deploy:
+    name: Build, Push & Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ECR_AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Store image URI in a plain env var for deployment.
+      - name: Set IMAGE env var
+        run: |
+          echo "IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+
+      - name: Build, tag, and push image to ECR
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: true
+          tags: ${{ env.IMAGE }}
+
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.TASK_FAMILY }} \
+            --query 'taskDefinition' \
+            --output json > task-definition.json
+
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            task-definition.json > cleaned-task-def.json
+
+          mv cleaned-task-def.json task-definition.json
+
+          echo "Container names in task def:"
+          jq '[.containerDefinitions[].name]' task-definition.json
+
+      - name: Update image in task definition
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ env.IMAGE }}
+
+      - name: Deploy to ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+  verify:
+    name: Verify Health
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Health check
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          echo "Checking health at: ${APP_URL}/health"
+
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${APP_URL}/health" || echo "000")
+            if [[ "$STATUS" == "200" ]]; then
+              echo "Application is healthy!"
+              BODY=$(curl -s "${APP_URL}/health")
+              echo "$BODY" | jq . 2>/dev/null || echo "$BODY"
+              exit 0
+            fi
+            echo "Attempt $i/30: HTTP $STATUS — waiting 10s..."
+            sleep 10
+          done
+
+          echo "Health check failed after 5 minutes!"
+          exit 1

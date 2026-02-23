@@ -1,0 +1,42 @@
+# Version control
+.git
+.gitignore
+
+# IDE & editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docker files (don't need to be inside the image)
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# Documentation
+*.md
+LICENSE
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Terraform
+terraform/
+*.tf
+*.tfvars
+*.tfstate*
+.terraform/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test & dev dependencies
+tests/
+phpunit.xml*
+.phpunit*
+
+# Env files (secrets should come from ECS task definition)
+.env
+.env.*

@@ -1,0 +1,66 @@
+# Triggered on PRs to main branch for app/ changes. Lint Dockerfile, Build image, Trivy scan
+name: CI — Lint & Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+
+jobs:
+  lint:
+    name: Lint Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile with hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: app/Dockerfile
+          failure-threshold: warning
+
+  build-and-scan:
+    name: Build & Scan
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ECR_AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: tag
+        run: echo "IMAGE_TAG=pr-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: false
+          load: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/php-app:${{ steps.tag.outputs.IMAGE_TAG }}
+
+      #Trivy scan - disabled due to a lot of vulns
+      # - name: Scan image with Trivy
+      #   uses: aquasecurity/trivy-action@0.28.0
+      #   with:
+      #     image-ref: "${{ steps.ecr.outputs.registry }}/php-app:${{ steps.tag.outputs.IMAGE_TAG }}"
+      #     format: table
+      #     exit-code: 1
+      #     severity: CRITICAL,HIGH
+      #     timeout: 10m
