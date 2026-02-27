@@ -57,7 +57,7 @@ resource "aws_security_group_rule" "ecs_egress_all" {
 }
 
 
-# Amazon ECR 
+#ECR 
 resource "aws_ecr_repository" "php_app" {
   name                 = local.app_name
   image_tag_mutability = "IMMUTABLE"
@@ -74,7 +74,7 @@ resource "aws_ecr_lifecycle_policy" "php_app" {
   policy = jsonencode({
     rules = [
       {
-        # Rule 1: delete untagged images after 1 day
+        # Delete untagged images after 1 day
         rulePriority = 1
         description  = "Remove untagged images after 1 day"
         selection = {
@@ -86,7 +86,7 @@ resource "aws_ecr_lifecycle_policy" "php_app" {
         action = { type = "expire" }
       },
       {
-        # Rule 2: keep last 10 CI build images (sha-* tags)
+        # Keep last 10 CI build images (sha-* tags)
         rulePriority = 2
         description  = "Keep last 10 CI build images (sha-* tags)"
         selection = {
@@ -98,7 +98,7 @@ resource "aws_ecr_lifecycle_policy" "php_app" {
         action = { type = "expire" }
       },
       {
-        # Rule 3: keep last N release images (v* tags)
+        # Keep last N release images (v* tags)
         rulePriority = 3
         description  = "Keep last ${var.image_retention_count} release images"
         selection = {
@@ -123,7 +123,7 @@ resource "aws_cloudwatch_log_group" "php_app" {
 }
 
 
-# Application Load Balancer
+# ALB
 # In production, add HTTPS listener (port 443) with ACM certificate.
 # HTTP-only is used here to keep the lab environment
 resource "aws_lb" "alb" {
@@ -143,7 +143,7 @@ resource "aws_lb_target_group" "php_app" {
   port        = var.container_port
   protocol    = "HTTP"
   vpc_id      = data.aws_vpc.default.id
-  target_type = "ip" # Required for Fargate (awsvpc network mode)
+  target_type = "ip" # required for Fargate
 
   health_check {
     enabled             = true
@@ -177,7 +177,7 @@ resource "aws_lb_listener" "http" {
 }
 
 
-# ECS Cluster
+# ECS cluster
 resource "aws_ecs_cluster" "main" {
   name = "${local.name_prefix}-cluster"
 
@@ -243,9 +243,7 @@ resource "aws_ecs_task_definition" "php_app" {
 
 
 # ECS Service
-# Deployment circuit breaker: if the new task fails to stabilize,
 # ECS automatically rolls back to the previous task definition.
-# This is more reliable than application-level rollback logic.
 
 resource "aws_ecs_service" "php_app" {
   name            = "${local.name_prefix}-${local.app_name}"
@@ -255,11 +253,11 @@ resource "aws_ecs_service" "php_app" {
   launch_type     = "FARGATE"
 
   # Zero-downtime rolling deployment
-  deployment_minimum_healthy_percent = 100
+  deployment_minimum_healthy_percent = 100 #min % task should be healthy during deployment
   deployment_maximum_percent         = 200
-  health_check_grace_period_seconds  = 60
+  health_check_grace_period_seconds  = 60 #60 seconds to check app is healthy
 
-  deployment_circuit_breaker {
+  deployment_circuit_breaker { # enables rollback for ECS
     enable   = true
     rollback = true
   }
